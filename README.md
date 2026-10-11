@@ -1,5 +1,5 @@
 
-# EMS Probability Explorer v3.2.0
+# EMS Probability Explorer v3.2.2
 
 A button-driven, chief-facing Streamlit application for querying 10 years of EMS call data.
 
@@ -228,7 +228,7 @@ Deploy to Streamlit Community Cloud or an authenticated department/intranet serv
 No native App Store package is required; this remains a responsive Streamlit web app.
 
 
-## v3.2.0 — Unit Commitment
+## v3.2.2 — Unit Commitment
 
 Adds a dedicated **Unit Commitment** tab for apparatus-capacity analysis.
 
@@ -255,3 +255,13 @@ Filters:
 - concurrency threshold.
 
 Breakdowns are available by unit, month, weekday, 4-hour block, and dispatch family, with CSV export.
+
+
+## Version History
+
+See the in-app **Methods** tab for the complete history from v1.0 through v3.2.2.
+
+## v3.2.2 — Medic Fleet Commitment Scope
+
+Unit Commitment is intentionally limited to Medic 10, 20, 30, 40, 50, 60, and 70.
+Medic 40 is included because it is being added to the fleet.

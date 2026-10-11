@@ -14,7 +14,7 @@ CONC=BASE/'data'/'EMS_10yr_Concurrency_Incident_Level.csv'
 ENRICHED=BASE/'data'/'EMS_10yr_Clean_Normalized_Concurrency_Enriched.csv'
 LOGO=BASE/'assets'/'jackson_hole_fire_ems_logo.png'
 
-st.set_page_config(page_title='EMS Probability Explorer v3.2.0',page_icon='📊',layout='wide',initial_sidebar_state='collapsed')
+st.set_page_config(page_title='EMS Probability Explorer v3.2.2',page_icon='📊',layout='wide',initial_sidebar_state='collapsed')
 
 @st.cache_data(show_spinner=False)
 def get_clean(): return load_clean(CLEAN)
@@ -57,6 +57,16 @@ def get_unit_commitment():
     return u
 
 unit_commitment=get_unit_commitment()
+
+# Unit Commitment scope: current/near-term medic fleet only.
+# Medic 40 is included intentionally as it is being added to the fleet.
+COMMITMENT_MEDIC_UNITS = [
+    'Medic 10', 'Medic 20', 'Medic 30', 'Medic 40',
+    'Medic 50', 'Medic 60', 'Medic 70'
+]
+unit_commitment = unit_commitment[
+    unit_commitment['unit_norm'].isin(COMMITMENT_MEDIC_UNITS)
+].copy()
 
 def commitment_summary(df):
     s=pd.to_numeric(df['commitment_min_valid'],errors='coerce').dropna()
@@ -192,7 +202,7 @@ with st.sidebar:
     st.metric('Normalized records',f'{len(clean):,}')
     st.metric('Unique incident intervals',f'{len(conc):,}')
     st.caption('Concurrency is computed once per distinct incident and joined back to normalized records for combined queries.')
-    st.divider(); st.caption('Version 3.2.0 • Mobile optimized • Unit commitment')
+    st.divider(); st.caption('Version 3.2.2 • Mobile optimized • Unit commitment')
 
 st.title('EMS Probability Explorer')
 st.caption('A-Shift Data Performance | Insights for Action')
@@ -427,10 +437,10 @@ with tabs[6]:
     st.caption('Validated commitment = unit notified by dispatch → unit back in service. Each incident + unit response is counted once so multi-patient records do not double-count apparatus time.')
 
     uc=unit_commitment.copy()
+    st.caption('Scope: Medic 10, 20, 30, 40, 50, 60, and 70. Medic 40 is included as it is being added to the fleet.')
 
     # Mobile-friendly filters
-    unit=st.selectbox('Unit',['Any']+uniques(uc,'unit_norm'),key='uc_unit')
-    family=st.selectbox('Unit family',['Any']+uniques(uc,'unit_family'),key='uc_family')
+    unit=st.selectbox('Unit',['Any']+COMMITMENT_MEDIC_UNITS,key='uc_unit')
     dispatch=st.selectbox('Dispatch family',['Any']+uniques(uc,'dispatch_family'),key='uc_dispatch')
     month=st.selectbox('Month',['Any']+[MONTH_LABELS[i] for i in range(1,13)],key='uc_month')
     tblock=st.selectbox('4-hour block',['Any','00–04','04–08','08–12','12–16','16–20','20–24'],key='uc_tblock')
@@ -438,7 +448,6 @@ with tabs[6]:
     concurrent=st.selectbox('Concurrency at dispatch',['Any','2+','3+','4+'],key='uc_conc')
 
     if unit!='Any': uc=uc[uc['unit_norm']==unit]
-    if family!='Any': uc=uc[uc['unit_family']==family]
     if dispatch!='Any': uc=uc[uc['dispatch_family']==dispatch]
     if month!='Any':
         mm=next(k for k,v in MONTH_LABELS.items() if v==month)
@@ -594,41 +603,88 @@ Observed historical probabilities are descriptive; they do not imply causation o
 ''')
 
     st.markdown('''
-### Version Notes
+### Version History
 
-**v3.2.0**
-- Added dedicated Unit Commitment tab.
+**v3.2.2 — Medic Fleet Commitment Scope**
+- Restricted **Unit Commitment** analysis to Medic 10, 20, 30, 40, 50, 60, and 70.
+- Added Medic 40 to the selectable fleet list in anticipation of its addition to service.
+- Removed the redundant Unit Family filter from Unit Commitment.
+- `Any` now means any of these seven medic units rather than all apparatus in the source dataset.
+
+**v3.2.1 — Version History**
+- Added a complete in-app history of Probability Explorer changes.
+- No probability, concurrency, temporal-trend, comparison, or unit-commitment calculation logic changed from v3.2.0.
+
+**v3.2.0 — Unit Commitment**
+- Added dedicated **Unit Commitment** tab.
 - Deduplicates multi-patient repeats to one incident + unit response before calculating unit-hours.
-- Adds median, P75, P90, total unit-hours, and >60 / >90 minute burden measures.
-- Adds filters for unit, unit family, dispatch family, month, 4-hour block, zone, and concurrency.
-- Adds operational burden charts and CSV export.
+- Added median, P75, P90, total unit-hours, and >60 / >90 minute burden measures.
+- Added filters for unit, unit family, dispatch family, month, 4-hour block, zone, and concurrency.
+- Added operational-burden charts and CSV export.
 
-**v3.1.0**
-- Mobile-first responsive layout and collapsed sidebar.
-- Touch-sized buttons and two-across Quick Button grids.
-- Horizontally scrollable tab navigation on narrow screens.
+**v3.1.0 — Mobile**
+- Added mobile-first responsive layout with collapsed sidebar.
+- Added touch-sized controls and two-across Quick Button grids.
+- Made tab navigation horizontally scrollable on narrow screens.
 - Reworked Boolean Builder and Compare inputs for phone use.
-- Mobile-friendly result metrics and stacked export actions.
+- Added mobile-friendly result metrics and stacked export actions.
 
-**v3.0.3**
-- Fixed Boolean audit NULL rendering and retained the in-app User Guide / Version Notes.
+**v3.0.3 — Boolean Audit Fix**
+- Fixed stray `NULL` rendering in **Boolean logic / audit**.
+- Replaced Streamlit list-comprehension rendering with ordinary loops.
 
-**v3.0**
+**v3.0.2 — Audit Rendering Fix**
+- Suppressed empty/invalid filter objects in audit output.
+- Improved Event / Given label rendering and PDF labels.
+
+**v3.0.1 — Methods / User Guide**
+- Added in-app Methods / Audit user guide and version notes.
+- Clarified Wilson confidence intervals, concurrency semantics, and dataset roles.
+
+**v3.0.0 — Major Analysis Expansion**
 - Added Boolean Query Builder with AND / OR / NOT logic.
 - Added Temporal Trends by year, month, weekday, hour, and 4-hour block.
 - Expanded Compare with explicit numerator / denominator, Wilson CI for each group, percentage-point difference, risk ratio, odds ratio, and CI for the difference.
 - Added one-click PDF executive brief export.
 - Added dedicated Concurrency tab.
 
-**v2.8.x**
-- Added enriched concurrency for combined clinical and demographic queries.
-- Added multi-select Quick Buttons.
-- Added 8 clinical quick-access families.
-- Added gender, age, weekday, season, and time-of-day filters.
-- Added **All** as a Clinical impression choice.
-- Added chief-level Wilson CI explanation.
-- Clarified Compare numerator / denominator display.
-- Added department branding and A-Shift Data Performance footer.
+**v2.8.7 — Clinical Quick Buttons / Branding**
+- Expanded quick access to eight normalized clinical families.
+- Updated Jackson Hole Fire/EMS sidebar branding.
+
+**v2.8.6 — Branding**
+- Corrected footer branding to **A-Shift | Data Performance**.
+
+**v2.8.5 — Compare Clarity**
+- Replaced ambiguous `n` language with explicit numerator / denominator presentation.
+
+**v2.8.4 — Compare Output**
+- Improved comparison display to show event records and total qualifying records clearly.
+
+**v2.8.3 — Clinical “All”**
+- Added **All** under Build a Probability → Clinical impression.
+
+**v2.8.2 — Wilson CI Guidance**
+- Added chief-level explanation of Wilson 95% confidence intervals in Audit / Show Math.
+
+**v2.8.1 — Notation Fix**
+- Fixed month-list notation `TypeError` in the probability notation function.
+
+**v2.8.0 — Concurrency Enrichment**
+- Added enriched concurrency for combined clinical, demographic, and performance queries.
+- Preserved incident-level concurrency while retaining normalized record-level clinical detail.
+- Added multi-select Quick Buttons plus gender, age, weekday, season, time-of-day, and concurrency filters.
+
+**v2.1 — Streamlit Stability**
+- Fixed duplicate `download_button` IDs with unique widget keys.
+
+**v2.0 — Interactive Explorer**
+- Added button-driven probability building, concurrency, confidence intervals, audit output, and group comparison.
+- Added quick filters for day, season, 4-hour block, clinical family, performance, gender, and age.
+
+**v1.0 — Initial Probability Explorer**
+- Established the Streamlit application and deterministic probability engine.
+- Added core marginal and conditional EMS probability calculations from the normalized 10-year dataset.
 ''')
 
     st.code('A-Shift Data Performance | Insights for Action')
