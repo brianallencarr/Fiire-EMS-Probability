@@ -1,5 +1,5 @@
 
-# EMS Probability Explorer v3.1.0
+# EMS Probability Explorer v3.2.0
 
 A button-driven, chief-facing Streamlit application for querying 10 years of EMS call data.
 
@@ -226,3 +226,32 @@ Deploy to Streamlit Community Cloud or an authenticated department/intranet serv
 **Android:** Chrome → menu → **Add to Home screen** / **Install app**.
 
 No native App Store package is required; this remains a responsive Streamlit web app.
+
+
+## v3.2.0 — Unit Commitment
+
+Adds a dedicated **Unit Commitment** tab for apparatus-capacity analysis.
+
+Method:
+- Commitment = validated `Incident Unit Notified By Dispatch Date Time` → `Incident Unit Back In Service Date Time`.
+- Invalid negative/extreme intervals remain excluded from the derived duration, while raw timestamps are preserved.
+- Multi-patient repeats are deduplicated to one `incident_key + unit` response before unit-hours are summed.
+
+Chief-facing measures:
+- unit responses;
+- median commitment;
+- P75 commitment;
+- P90 commitment;
+- total unit-hours;
+- percent >60 minutes;
+- percent >90 minutes.
+
+Filters:
+- unit and unit family;
+- dispatch family;
+- month;
+- 4-hour block;
+- zone;
+- concurrency threshold.
+
+Breakdowns are available by unit, month, weekday, 4-hour block, and dispatch family, with CSV export.

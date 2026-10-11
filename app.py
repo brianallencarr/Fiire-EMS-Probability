@@ -14,7 +14,7 @@ CONC=BASE/'data'/'EMS_10yr_Concurrency_Incident_Level.csv'
 ENRICHED=BASE/'data'/'EMS_10yr_Clean_Normalized_Concurrency_Enriched.csv'
 LOGO=BASE/'assets'/'jackson_hole_fire_ems_logo.png'
 
-st.set_page_config(page_title='EMS Probability Explorer v3.1.0',page_icon='📊',layout='wide',initial_sidebar_state='collapsed')
+st.set_page_config(page_title='EMS Probability Explorer v3.2.0',page_icon='📊',layout='wide',initial_sidebar_state='collapsed')
 
 @st.cache_data(show_spinner=False)
 def get_clean(): return load_clean(CLEAN)
@@ -24,6 +24,53 @@ def get_conc(): return load_concurrency(CONC)
 def get_enriched(): return load_clean(ENRICHED)
 
 clean=get_clean(); conc=get_conc(); enriched=get_enriched()
+
+
+@st.cache_data(show_spinner=False)
+def get_unit_commitment():
+    """One row per distinct incident + unit response for validated commitment analysis."""
+    d=enriched.copy()
+    d=d[d['commitment_min_valid'].notna()].copy()
+    d['commitment_min_valid']=pd.to_numeric(d['commitment_min_valid'],errors='coerce')
+    d=d[d['commitment_min_valid'].notna() & (d['commitment_min_valid'] >= 0)].copy()
+
+    # Multi-patient records can repeat the same apparatus response.  Collapse those
+    # duplicates so unit-hours are not double-counted.
+    keys=['incident_key','unit_norm']
+    agg={
+        'commitment_min_valid':'max',
+        'unit_family':'first',
+        'dispatch_family':'first',
+        'year':'first',
+        'month':'first',
+        'month_name':'first',
+        'weekday':'first',
+        'hour':'first',
+        'zone_norm':'first',
+        'concurrent_2plus_at_start':'max',
+        'concurrent_3plus_at_start':'max',
+        'concurrent_4plus_at_start':'max',
+    }
+    available={k:v for k,v in agg.items() if k in d.columns}
+    u=d.groupby(keys,dropna=False,as_index=False).agg(available)
+    u['unit_hours']=u['commitment_min_valid']/60.0
+    return u
+
+unit_commitment=get_unit_commitment()
+
+def commitment_summary(df):
+    s=pd.to_numeric(df['commitment_min_valid'],errors='coerce').dropna()
+    if s.empty:
+        return {'n':0,'median':None,'p75':None,'p90':None,'unit_hours':0.0,'gt60':None,'gt90':None}
+    return {
+        'n':int(s.size),
+        'median':float(s.median()),
+        'p75':float(s.quantile(.75)),
+        'p90':float(s.quantile(.90)),
+        'unit_hours':float(s.sum()/60.0),
+        'gt60':float((s>60).mean()),
+        'gt90':float((s>90).mean()),
+    }
 
 
 # Mobile-first presentation layer.
@@ -145,12 +192,12 @@ with st.sidebar:
     st.metric('Normalized records',f'{len(clean):,}')
     st.metric('Unique incident intervals',f'{len(conc):,}')
     st.caption('Concurrency is computed once per distinct incident and joined back to normalized records for combined queries.')
-    st.divider(); st.caption('Version 3.1.0 • Mobile optimized')
+    st.divider(); st.caption('Version 3.2.0 • Mobile optimized • Unit commitment')
 
 st.title('EMS Probability Explorer')
 st.caption('A-Shift Data Performance | Insights for Action')
 
-tabs=st.tabs(['Quick Buttons','Build a Probability','Boolean Builder','Compare','Temporal Trends','Concurrency','Methods'])
+tabs=st.tabs(['Quick Buttons','Build a Probability','Boolean Builder','Compare','Temporal Trends','Concurrency','Unit Commitment','Methods'])
 
 # QUICK BUTTONS
 with tabs[0]:
@@ -373,7 +420,128 @@ with tabs[5]:
         r=calc(conc,ev,[f('month','==',m,f'Month = {MONTH_LABELS[m]}')]); rows.append({'month':MONTH_LABELS[m][:3],'probability':r['probability']*100 if r['probability'] is not None else None,'n':r['denominator']})
     cdf=pd.DataFrame(rows); st.altair_chart(alt.Chart(cdf).mark_bar().encode(x=alt.X('month:N',sort=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']),y=alt.Y('probability:Q',title='Probability (%)'),tooltip=['month',alt.Tooltip('probability:Q',format='.2f'),'n']).properties(height=290),use_container_width=True)
 
+
+# UNIT COMMITMENT
 with tabs[6]:
+    st.subheader('Unit Commitment')
+    st.caption('Validated commitment = unit notified by dispatch → unit back in service. Each incident + unit response is counted once so multi-patient records do not double-count apparatus time.')
+
+    uc=unit_commitment.copy()
+
+    # Mobile-friendly filters
+    unit=st.selectbox('Unit',['Any']+uniques(uc,'unit_norm'),key='uc_unit')
+    family=st.selectbox('Unit family',['Any']+uniques(uc,'unit_family'),key='uc_family')
+    dispatch=st.selectbox('Dispatch family',['Any']+uniques(uc,'dispatch_family'),key='uc_dispatch')
+    month=st.selectbox('Month',['Any']+[MONTH_LABELS[i] for i in range(1,13)],key='uc_month')
+    tblock=st.selectbox('4-hour block',['Any','00–04','04–08','08–12','12–16','16–20','20–24'],key='uc_tblock')
+    zone=st.selectbox('Zone',['Any']+uniques(uc,'zone_norm'),key='uc_zone')
+    concurrent=st.selectbox('Concurrency at dispatch',['Any','2+','3+','4+'],key='uc_conc')
+
+    if unit!='Any': uc=uc[uc['unit_norm']==unit]
+    if family!='Any': uc=uc[uc['unit_family']==family]
+    if dispatch!='Any': uc=uc[uc['dispatch_family']==dispatch]
+    if month!='Any':
+        mm=next(k for k,v in MONTH_LABELS.items() if v==month)
+        uc=uc[pd.to_numeric(uc['month'],errors='coerce')==mm]
+    if tblock!='Any':
+        ranges={'00–04':(0,4),'04–08':(4,8),'08–12':(8,12),'12–16':(12,16),'16–20':(16,20),'20–24':(20,24)}
+        lo_,hi_=ranges[tblock]
+        hh=pd.to_numeric(uc['hour'],errors='coerce')
+        uc=uc[(hh>=lo_) & (hh<hi_)]
+    if zone!='Any': uc=uc[uc['zone_norm']==zone]
+    if concurrent!='Any':
+        fld={'2+':'concurrent_2plus_at_start','3+':'concurrent_3plus_at_start','4+':'concurrent_4plus_at_start'}[concurrent]
+        if fld in uc.columns: uc=uc[uc[fld].fillna(False).astype(bool)]
+
+    s=commitment_summary(uc)
+    c1,c2=st.columns(2)
+    c1.metric('Unit responses',f"{s['n']:,}")
+    c2.metric('Total unit-hours',f"{s['unit_hours']:,.1f}")
+    c3,c4=st.columns(2)
+    c3.metric('Median commitment','—' if s['median'] is None else f"{s['median']:.1f} min")
+    c4.metric('P90 commitment','—' if s['p90'] is None else f"{s['p90']:.1f} min")
+    c5,c6=st.columns(2)
+    c5.metric('Commitment > 60 min','—' if s['gt60'] is None else f"{s['gt60']*100:.1f}%")
+    c6.metric('Commitment > 90 min','—' if s['gt90'] is None else f"{s['gt90']*100:.1f}%")
+    if s['p75'] is not None: st.caption(f"P75 commitment: {s['p75']:.1f} min")
+
+    st.markdown('#### Operational burden profile')
+    dim=st.selectbox('Break down by',['Unit','Month','Weekday','4-hour block','Dispatch family'],key='uc_dim')
+    metric=st.selectbox('Chart metric',['Total unit-hours','Median commitment','P90 commitment','Unit responses'],key='uc_metric')
+
+    d=uc.copy()
+    if dim=='Unit':
+        d['_group']=d['unit_norm'].fillna('Missing')
+        sort_order=None
+    elif dim=='Month':
+        d['_group']=pd.to_numeric(d['month'],errors='coerce').map(MONTH_LABELS).str[:3]
+        sort_order=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
+    elif dim=='Weekday':
+        d['_group']=d['weekday'].fillna('Missing').str[:3]
+        sort_order=['Mon','Tue','Wed','Thu','Fri','Sat','Sun']
+    elif dim=='4-hour block':
+        hh=pd.to_numeric(d['hour'],errors='coerce')
+        d['_group']=pd.cut(hh,bins=[-0.01,4,8,12,16,20,24],right=False,labels=['00–04','04–08','08–12','12–16','16–20','20–24'])
+        sort_order=['00–04','04–08','08–12','12–16','16–20','20–24']
+    else:
+        d['_group']=d['dispatch_family'].fillna('Missing')
+        sort_order=None
+
+    rows=[]
+    for g,gdf in d.dropna(subset=['_group']).groupby('_group',observed=False):
+        z=commitment_summary(gdf)
+        rows.append({
+            'label':str(g), 'responses':z['n'], 'median_min':z['median'], 'p75_min':z['p75'],
+            'p90_min':z['p90'], 'unit_hours':z['unit_hours'],
+            'pct_gt60':None if z['gt60'] is None else z['gt60']*100,
+            'pct_gt90':None if z['gt90'] is None else z['gt90']*100,
+        })
+    udf=pd.DataFrame(rows)
+    if not udf.empty:
+        metric_map={
+            'Total unit-hours':('unit_hours','Unit-hours'),
+            'Median commitment':('median_min','Minutes'),
+            'P90 commitment':('p90_min','Minutes'),
+            'Unit responses':('responses','Responses'),
+        }
+        yfield,ytitle=metric_map[metric]
+        xenc=alt.X('label:N',title=dim,sort=sort_order)
+        chart=alt.Chart(udf).mark_bar().encode(
+            x=xenc,
+            y=alt.Y(f'{yfield}:Q',title=ytitle),
+            tooltip=[
+                alt.Tooltip('label:N',title=dim),
+                alt.Tooltip('responses:Q',title='Responses'),
+                alt.Tooltip('median_min:Q',title='Median min',format='.1f'),
+                alt.Tooltip('p90_min:Q',title='P90 min',format='.1f'),
+                alt.Tooltip('unit_hours:Q',title='Unit-hours',format='.1f'),
+                alt.Tooltip('pct_gt90:Q',title='% >90 min',format='.1f'),
+            ]
+        ).properties(height=320)
+        st.altair_chart(chart,use_container_width=True)
+        show=udf.rename(columns={
+            'label':dim,'responses':'Responses','median_min':'Median min','p75_min':'P75 min',
+            'p90_min':'P90 min','unit_hours':'Unit-hours','pct_gt60':'% >60 min','pct_gt90':'% >90 min'
+        })
+        st.dataframe(show,use_container_width=True,hide_index=True,column_config={
+            'Median min':st.column_config.NumberColumn(format='%.1f'),
+            'P75 min':st.column_config.NumberColumn(format='%.1f'),
+            'P90 min':st.column_config.NumberColumn(format='%.1f'),
+            'Unit-hours':st.column_config.NumberColumn(format='%.1f'),
+            '% >60 min':st.column_config.NumberColumn(format='%.1f%%'),
+            '% >90 min':st.column_config.NumberColumn(format='%.1f%%'),
+        })
+        st.download_button('Download commitment table (CSV)',show.to_csv(index=False),file_name='ems_unit_commitment_summary.csv',mime='text/csv',use_container_width=True,key='uc_csv')
+    else:
+        st.info('No qualifying unit responses for the selected filters.')
+
+    with st.expander('How to interpret unit commitment',expanded=False):
+        st.write('**Median** describes a typical commitment. **P90** describes a high-burden response: 90% of qualifying unit responses are shorter and 10% are longer.')
+        st.write('**Total unit-hours** measures system capacity consumed, so a less frequent call type can still impose a large operational burden if commitments are long.')
+        st.write('Use concurrency filtering to test whether apparatus commitment is longer during periods when the system is already handling multiple incidents.')
+        st.caption('Commitment uses validated notified-to-back-in-service intervals. Invalid negative or extreme source intervals are excluded from this derived measure; raw timestamps remain unchanged.')
+
+with tabs[7]:
     st.subheader('Methods / Audit')
 
     st.markdown('''
@@ -396,6 +564,9 @@ Choose a clinical event and view its observed probability by year, month, weekda
 
 **Concurrency**  
 Use this tab for pure incident-level system-demand probabilities such as 2+, 3+, or 4+ simultaneous incidents.
+
+**Unit Commitment**  
+Measure apparatus time consumed using validated unit-notified to back-in-service intervals. Filter by unit, dispatch family, month, time block, zone, and concurrency; compare median, P75, P90, total unit-hours, and long-commitment rates.
 
 **Mobile use**  
 The sidebar starts collapsed on phones. Swipe/scroll the tab row horizontally to reach all sections. Controls are sized for touch, and charts resize to the screen width.
@@ -424,6 +595,13 @@ Observed historical probabilities are descriptive; they do not imply causation o
 
     st.markdown('''
 ### Version Notes
+
+**v3.2.0**
+- Added dedicated Unit Commitment tab.
+- Deduplicates multi-patient repeats to one incident + unit response before calculating unit-hours.
+- Adds median, P75, P90, total unit-hours, and >60 / >90 minute burden measures.
+- Adds filters for unit, unit family, dispatch family, month, 4-hour block, zone, and concurrency.
+- Adds operational burden charts and CSV export.
 
 **v3.1.0**
 - Mobile-first responsive layout and collapsed sidebar.
